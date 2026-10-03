@@ -3,8 +3,6 @@ import { GOOGLE_MAPS_KEY } from './config.js';
 
 const ROUNDS = 5;
 const KEY_STORAGE = 'terran.apiKey';
-const TILES = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
 
 const MODES = {
   move: { name: 'Move', look: true, walk: true },
@@ -17,9 +15,9 @@ const $ = (id) => document.getElementById(id);
 let sv;          // google.maps.StreetViewService
 let svLib;       // streetView library namespace
 let pano;        // google.maps.StreetViewPanorama
-let guessMap, resultMap;
+let map;         // google.maps.Map; the guess box grows to full screen for results
 let guessMarker = null;
-let resultLayer = null;
+let resultOverlays = [];
 let game = null; // { mode, round, results, start, guess, phase }
 
 // ---------- storage ----------
@@ -74,6 +72,9 @@ async function initGoogle() {
     motionTracking: false,
     motionTrackingControl: false,
     imageDateControl: false,
+    // keep Street View's own controls clear of the guess map in the bottom right
+    panControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
+    zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
   });
 }
 
@@ -126,30 +127,45 @@ async function findPano() {
   throw new Error('Could not find any Street View coverage. Try again.');
 }
 
-// ---------- maps ----------
+// ---------- map ----------
 
-function initMaps() {
-  guessMap = L.map('guess-map', { worldCopyJump: true, zoomControl: false, attributionControl: false })
-    .setView([20, 0], 1);
-  L.tileLayer(TILES, { maxZoom: 18 }).addTo(guessMap);
-  guessMap.on('click', (e) => placeGuess(e.latlng.wrap()));
-  $('guess-box').addEventListener('transitionend', () => guessMap.invalidateSize());
+const WORLD = { center: { lat: 20, lng: 0 }, zoom: 1 };
+const dot = (fill, scale) => ({
+  path: google.maps.SymbolPath.CIRCLE, scale, fillColor: fill, fillOpacity: 1, strokeColor: '#111', strokeWeight: 2,
+});
 
-  resultMap = L.map('result-map', { worldCopyJump: true });
-  L.tileLayer(TILES, { maxZoom: 18, attribution: TILE_ATTRIBUTION }).addTo(resultMap);
+async function initMap() {
+  const { Map } = await google.maps.importLibrary('maps');
+  map = new Map($('map'), {
+    ...WORLD,
+    minZoom: 1,
+    disableDefaultUI: true,
+    zoomControl: true,
+    clickableIcons: false,
+    gestureHandling: 'greedy',
+    draggableCursor: 'crosshair',
+    styles: [
+      { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+      { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+    ],
+  });
+  map.addListener('click', (e) => placeGuess(e.latLng));
 }
 
-function placeGuess(latlng) {
+function placeGuess(latLng) {
   if (game?.phase !== 'guessing') return;
-  game.guess = { lat: latlng.lat, lng: latlng.lng };
-  if (guessMarker) guessMarker.setLatLng(latlng);
-  else guessMarker = L.circleMarker(latlng, guessStyle).addTo(guessMap);
+  game.guess = { lat: latLng.lat(), lng: latLng.lng() };
+  if (guessMarker) guessMarker.setPosition(latLng);
+  else guessMarker = new google.maps.Marker({ map, position: latLng, icon: dot('#fff', 7), clickable: false });
   $('guess-btn').disabled = false;
   $('guess-btn').textContent = 'Guess';
 }
 
-const guessStyle = { radius: 7, color: '#111', weight: 2, fillColor: '#fff', fillOpacity: 1 };
-const actualStyle = { radius: 8, color: '#111', weight: 2, fillColor: '#ff5a36', fillOpacity: 1 };
+function clearMap() {
+  if (guessMarker) { guessMarker.setMap(null); guessMarker = null; }
+  resultOverlays.forEach((o) => o.setMap(null));
+  resultOverlays = [];
+}
 
 // ---------- scoring ----------
 
@@ -177,7 +193,6 @@ function startGame(mode) {
   game = { mode, round: 0, results: [], phase: 'loading' };
   configurePano(mode);
   show('game');
-  guessMap.invalidateSize();
   nextRound();
 }
 
@@ -190,10 +205,11 @@ async function nextRound() {
   $('loading').textContent = 'finding a place…';
   updateHud();
 
-  if (guessMarker) { guessMarker.remove(); guessMarker = null; }
+  clearMap();
+  $('game').classList.remove('showing-result');
+  map.setOptions({ ...WORLD, draggableCursor: 'crosshair' });
   $('guess-btn').disabled = true;
   $('guess-btn').textContent = 'Place your guess';
-  guessMap.setView([20, 0], 1);
 
   let place;
   try {
@@ -251,25 +267,30 @@ function showSummary() {
   setActions([['Menu', quit, false], ['Play again', () => startGame(mode)]]);
 }
 
-function showResult(results) {
+async function showResult(results) {
   $('result').classList.remove('hidden');
-  resultMap.invalidateSize();
-  if (resultLayer) resultLayer.remove();
-  resultLayer = L.layerGroup().addTo(resultMap);
-  const points = [];
+  $('game').classList.add('showing-result');
+  clearMap();
+  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  await frames(); // the result text is filled in by now
+  $('game').style.setProperty('--bar', `${$('result').offsetHeight}px`);
+  await frames(); // let the map pick up its new size before fitting the view
+  map.setOptions({ draggableCursor: null });
+  const bounds = new google.maps.LatLngBounds();
   for (const r of results) {
-    const actual = [r.actual.lat, r.actual.lng];
-    // draw the guess on the same world copy as the actual location so the line takes the short way
-    let glng = r.guess.lng;
-    if (glng - r.actual.lng > 180) glng -= 360;
-    if (r.actual.lng - glng > 180) glng += 360;
-    const guess = [r.guess.lat, glng];
-    L.polyline([guess, actual], { color: '#111', weight: 2, dashArray: '6 6' }).addTo(resultLayer);
-    L.circleMarker(guess, guessStyle).addTo(resultLayer);
-    L.circleMarker(actual, actualStyle).addTo(resultLayer);
-    points.push(guess, actual);
+    resultOverlays.push(
+      new google.maps.Polyline({
+        map, path: [r.guess, r.actual], geodesic: true, strokeOpacity: 0,
+        icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#111', scale: 2 }, offset: '0', repeat: '12px' }],
+      }),
+      new google.maps.Marker({ map, position: r.guess, icon: dot('#fff', 7), clickable: false }),
+      new google.maps.Marker({ map, position: r.actual, icon: dot('#ff5a36', 8), clickable: false }),
+    );
+    bounds.extend(r.guess);
+    bounds.extend(r.actual);
   }
-  resultMap.fitBounds(points, { padding: [60, 60], maxZoom: 14 });
+  map.fitBounds(bounds, 60);
+  google.maps.event.addListenerOnce(map, 'idle', () => { if (map.getZoom() > 14) map.setZoom(14); });
 }
 
 function setActions(actions) {
@@ -290,6 +311,7 @@ function updateHud() {
 
 function quit() {
   game = null;
+  $('game').classList.remove('showing-result');
   show('menu');
 }
 
@@ -327,9 +349,9 @@ document.addEventListener('keydown', (e) => {
   try {
     await loadGoogle(key);
     await initGoogle();
+    await initMap();
   } catch (e) {
     return showKeyScreen(e.message);
   }
-  initMaps();
   show('menu');
 })();

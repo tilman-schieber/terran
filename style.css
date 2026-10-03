@@ -73,7 +73,12 @@ h1 { margin: 0; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
   transition: width .15s, height .15s, opacity .15s;
 }
 #guess-box:hover, #guess-box.pinned { width: min(680px, 60vw); height: min(520px, 70vh); opacity: 1; }
-#guess-map { flex: 1; border-radius: 6px; cursor: crosshair; }
+#map { flex: 1; min-height: 0; border-radius: 6px; }
+
+/* results: the guess box takes over the screen above the result bar */
+#game.showing-result #guess-box { inset: 0 0 var(--bar, 80px) 0; width: auto; height: auto; opacity: 1; transition: none; }
+#game.showing-result #map { border-radius: 0; }
+#game.showing-result #guess-btn { display: none; }
 #guess-btn { width: 100%; }
 #guess-btn:not(:disabled) { background: var(--text); color: var(--bg); border-color: var(--text); font-weight: 600; }
 
@@ -82,8 +87,7 @@ h1 { margin: 0; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
   #guess-box:hover { width: auto; height: 42vh; }
 }
 
-#result { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--bg); }
-#result-map { flex: 1; }
+#result { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--bg); }
 #result-bar {
   display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 16px 20px; border-top: 1px solid var(--line);
@@ -101,5 +105,3 @@ h1 { margin: 0; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
   display: flex; align-items: center; justify-content: center;
   background: var(--bg); color: var(--muted);
 }
-
-.leaflet-container { background: #d4dadc; font: inherit; }

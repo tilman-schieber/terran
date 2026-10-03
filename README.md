@@ -26,8 +26,6 @@ localhost and `gh.tschieber.de`, to the Maps JavaScript API only, and capped at 
 
 Live at https://gh.tschieber.de/terran/
 
-The guess map uses OpenStreetMap data via CARTO tiles, so it needs no key.
-
 ## Keys
 
 - `Space` / `Enter`: guess, or go to the next round

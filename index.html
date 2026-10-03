@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>terran</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -42,12 +41,11 @@
   <button id="to-start" class="hidden" title="Back to start (R)">back to start</button>
 
   <div id="guess-box">
-    <div id="guess-map"></div>
+    <div id="map"></div>
     <button id="guess-btn" disabled>Place your guess</button>
   </div>
 
   <div id="result" class="hidden">
-    <div id="result-map"></div>
     <div id="result-bar">
       <div id="result-text"></div>
       <div id="result-actions"></div>
@@ -57,7 +55,6 @@
   <div id="loading" class="hidden">finding a place…</div>
 </section>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>
