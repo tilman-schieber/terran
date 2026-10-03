@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>terran</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<section id="menu" class="screen hidden">
+  <h1>terran</h1>
+  <p class="sub">Five places. Guess where they are.</p>
+  <div class="modes">
+    <button data-mode="move"><b>Move</b><span>look around, walk anywhere</span></button>
+    <button data-mode="nm"><b>No move</b><span>look around and zoom</span></button>
+    <button data-mode="nmpz"><b>Still</b><span>one photo, nothing else</span></button>
+  </div>
+  <button id="change-key" class="link">change api key</button>
+</section>
+
+<section id="keyscreen" class="screen hidden">
+  <h1>terran</h1>
+  <p class="sub">Paste a Google Maps API key with the <b>Maps JavaScript API</b> enabled.<br>It is stored only in this browser.</p>
+  <p id="key-error" class="error hidden"></p>
+  <form id="key-form">
+    <input id="key-input" placeholder="AIza…" autocomplete="off" spellcheck="false" required>
+    <button>Save</button>
+  </form>
+</section>
+
+<section id="game" class="hidden">
+  <div id="pano"></div>
+  <div id="freeze" class="hidden"></div>
+
+  <div id="hud">
+    <span id="hud-round"></span>
+    <span id="hud-score"></span>
+    <button id="quit" class="link">menu</button>
+  </div>
+  <button id="to-start" class="hidden" title="Back to start (R)">back to start</button>
+
+  <div id="guess-box">
+    <div id="guess-map"></div>
+    <button id="guess-btn" disabled>Place your guess</button>
+  </div>
+
+  <div id="result" class="hidden">
+    <div id="result-map"></div>
+    <div id="result-bar">
+      <div id="result-text"></div>
+      <div id="result-actions"></div>
+    </div>
+  </div>
+
+  <div id="loading" class="hidden">finding a place…</div>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
