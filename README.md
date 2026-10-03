@@ -21,10 +21,10 @@ python -m http.server 8000
 Then open http://localhost:8000.
 
 The Maps JavaScript API key lives in `config.js`. Browser keys are public by design: this one is restricted to
-localhost and `tilman-schieber.github.io`, to the Maps JavaScript API only, and capped at 160 loads a day in the
+localhost and `gh.tschieber.de`, to the Maps JavaScript API only, and capped at 160 loads a day in the
 `terran-a7bc67` Google Cloud project. A key pasted on the start screen (or passed as `?key=...`) overrides it.
 
-Live at https://tilman-schieber.github.io/terran/
+Live at https://gh.tschieber.de/terran/
 
 The guess map uses OpenStreetMap data via CARTO tiles, so it needs no key.
 
