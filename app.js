@@ -636,7 +636,6 @@ $('guess-btn').addEventListener('click', () => submitGuess());
 $('to-start').addEventListener('click', backToStart);
 $('undo').addEventListener('click', undoMove);
 $('quit').addEventListener('click', quit);
-$('change-key').addEventListener('click', () => { save(KEY_STORAGE, null); location.reload(); });
 $('key-form').addEventListener('submit', (e) => {
   e.preventDefault();
   save(KEY_STORAGE, $('key-input').value.trim());

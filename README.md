@@ -36,7 +36,7 @@ Then open http://localhost:8000.
 
 The Maps JavaScript API key lives in `config.js`. Browser keys are public by design: this one is restricted to
 localhost and `gh.tschieber.de`, to the Maps JavaScript API only, and capped at 160 loads a day in the
-`terran-a7bc67` Google Cloud project. A key pasted on the start screen (or passed as `?key=...`) overrides it.
+`terran-a7bc67` Google Cloud project. To use your own key, pass it as `?key=...`. If the built-in key is ever rejected, the game asks for one instead.
 
 Live at https://gh.tschieber.de/terran/
 
