@@ -1,5 +1,6 @@
 import { REGIONS } from './regions.js';
-import { THEMES, CONTINENTS, DAILY, themeById } from './themes.js';
+import { THEMES, CONTINENTS, PRESETS, DAILY, themeById } from './themes.js';
+import { ICONS } from './icons.js';
 import { GOOGLE_MAPS_KEY } from './config.js';
 import { mountGlobe } from './globe.js';
 
@@ -7,13 +8,14 @@ const ROUNDS = 5;
 const KEY_STORAGE = 'terran.apiKey';
 const TIME_STORAGE = 'terran.timeLimit';
 const THEME_STORAGE = 'terran.theme';
+const MODE_STORAGE = 'terran.mode';
 const DAILY_STORAGE = 'terran.daily.'; // + date
 const TIME_LIMITS = [0, 10, 30, 60, 120, 300]; // seconds, 0 = no limit
 
 const MODES = {
-  move: { name: 'Move', look: true, walk: true },
-  nm:   { name: 'No move', look: true, walk: false },
-  nmpz: { name: 'Still', look: false, walk: false },
+  move: { name: 'Move', hint: 'Look around and walk anywhere.', look: true, walk: true },
+  nm:   { name: 'No move', hint: 'Look around and zoom, but stay put.', look: true, walk: false },
+  nmpz: { name: 'Still', hint: 'One fixed view. No turning, no zoom.', look: false, walk: false },
 };
 
 const $ = (id) => document.getElementById(id);
@@ -40,12 +42,17 @@ function save(key, value) {
 function readKey() {
   return new URLSearchParams(location.search).get('key') || load(KEY_STORAGE) || GOOGLE_MAPS_KEY;
 }
+// custom games start out with the Classic settings
 function readTimeLimit() {
-  const t = Number(load(TIME_STORAGE));
-  return TIME_LIMITS.includes(t) ? t : 0;
+  const t = Number(load(TIME_STORAGE) ?? 120);
+  return TIME_LIMITS.includes(t) ? t : 120;
 }
 function readTheme() {
   return themeById(load(THEME_STORAGE)) || THEMES[0];
+}
+function readMode() {
+  const m = load(MODE_STORAGE);
+  return MODES[m] ? m : 'move';
 }
 
 // ---------- seeded random ----------
@@ -80,8 +87,9 @@ function shuffle(list, rng) {
 // ---------- screens ----------
 
 function show(id) {
-  for (const s of ['menu', 'keyscreen', 'game']) $(s).classList.toggle('hidden', s !== id);
+  for (const s of ['menu', 'custom', 'keyscreen', 'game']) $(s).classList.toggle('hidden', s !== id);
   if (id === 'menu') renderMenu();
+  if (id === 'custom') renderCustom();
 }
 
 function showKeyScreen(error) {
@@ -293,7 +301,8 @@ const today = () => new Date().toISOString().slice(0, 10); // UTC, so everyone s
 
 // ---------- game flow ----------
 
-// opts: { theme, mode, timeLimit, rng?, preset?, daily?, challenge? }
+// opts: { title, theme, mode, timeLimit, rng?, preset?, daily?, challenge?, replay? }
+// replay: starts the same kind of game again from the summary
 function startGame(opts) {
   const rng = opts.rng || Math.random;
   game = {
@@ -310,16 +319,37 @@ function startGame(opts) {
   nextRound();
 }
 
+const dailyTheme = (date) => themeById(DAILY.themes[hashString(date) % DAILY.themes.length]);
+
 function playDaily() {
   const date = today();
-  const theme = themeById(DAILY.themes[hashString(date) % DAILY.themes.length]);
-  startGame({ theme, mode: DAILY.mode, timeLimit: DAILY.timeLimit, rng: seededRandom(hashString(`terran-daily-${date}`)), daily: date });
+  startGame({
+    title: 'Daily', theme: dailyTheme(date), mode: DAILY.mode, timeLimit: DAILY.timeLimit,
+    rng: seededRandom(hashString(`terran-daily-${date}`)), daily: date,
+  });
 }
 
 function playChallenge() {
   const c = challenge;
   challenge = null;
-  startGame({ theme: themeById(c.t) || THEMES[0], mode: c.m, timeLimit: c.l, preset: c.r, challenge: c });
+  startGame({ title: 'Challenge', theme: themeById(c.t) || THEMES[0], mode: c.m, timeLimit: c.l, preset: c.r, challenge: c });
+}
+
+// 'lookalikes' is a fresh random tricky neighbour group every game
+function presetTheme(p) {
+  if (p.theme !== 'lookalikes') return themeById(p.theme);
+  const groups = THEMES.filter((t) => t.group === 'Tricky neighbours');
+  return groups[Math.floor(Math.random() * groups.length)];
+}
+
+function playPreset(p) {
+  startGame({ title: p.name, theme: presetTheme(p), mode: p.mode, timeLimit: p.timeLimit, replay: () => playPreset(p) });
+}
+
+function playCustom() {
+  const opts = { title: 'Custom', theme: readTheme(), mode: readMode(), timeLimit: readTimeLimit() };
+  const replay = () => startGame({ ...opts, replay });
+  replay();
 }
 
 async function nextRound() {
@@ -438,7 +468,7 @@ function showSummary() {
   }
   $('result-text').innerHTML =
     `<div class="big">${fmtPts(points)} / ${fmtPts(ROUNDS * 5000)}</div>` +
-    `<div class="muted">${game.daily ? `Daily ${game.daily} · ` : ''}${describe(game.theme.name, game.mode, game.timeLimit)}</div>` +
+    `<div class="muted">${game.daily ? `Daily ${game.daily}` : game.title} · ${describe(game.theme.name, game.mode, game.timeLimit)}</div>` +
     note + `<table>${rows}</table>`;
 
   if (game.daily) {
@@ -446,10 +476,11 @@ function showSummary() {
     setActions([['Menu', quit, false], ['Copy result', (e) => copy(e.target, dailyText(game.daily, points))]]);
   } else {
     const { theme, mode, timeLimit } = game;
+    const again = game.replay || (() => startGame({ title: 'Custom', theme, mode, timeLimit }));
     setActions([
       ['Menu', quit, false],
       ['Copy challenge link', (e) => copy(e.target, challengeLink()), false],
-      ['Play again', () => startGame({ theme, mode, timeLimit })],
+      ['Play again', again],
     ]);
   }
   showResult(game.results);
@@ -499,7 +530,7 @@ function setActions(actions) {
 }
 
 function updateHud() {
-  $('hud-theme').textContent = game.daily ? 'Daily' : game.challenge ? 'Challenge' : game.theme.name;
+  $('hud-theme').textContent = game.title;
   $('hud-round').textContent = `Round ${Math.min(game.round, ROUNDS)} / ${ROUNDS}`;
   $('hud-score').textContent = `${fmtPts(total())} pts`;
 }
@@ -565,9 +596,24 @@ async function copy(button, text) {
 
 function renderMenu() {
   renderChallengeCard();
+  const [classic, ...others] = PRESETS;
+  $('play-icon').innerHTML = ICONS.classic;
+  $('play-text').textContent = describe('Anywhere', classic.mode, classic.timeLimit);
+  $('play').onclick = () => playPreset(classic);
   renderDailyCard();
-  renderThemes();
-  renderTimeLimits();
+  $('presets').replaceChildren(...others.map(presetCard));
+  $('custom-icon').innerHTML = ICONS.custom;
+}
+
+function presetCard(p) {
+  const b = document.createElement('button');
+  b.className = 'preset';
+  b.innerHTML = ICONS[p.id] +
+    `<b>${p.name}${p.tag ? ` <em>${p.tag}</em>` : ''}</b>` +
+    `<span>${p.blurb}</span>` +
+    `<small>${[MODES[p.mode].name, p.timeLimit ? fmtLimit(p.timeLimit) : 'no time limit'].join(' · ')}</small>`;
+  b.onclick = () => playPreset(p);
+  return b;
 }
 
 function renderChallengeCard() {
@@ -579,9 +625,9 @@ function renderChallengeCard() {
 
 function renderDailyCard() {
   const date = today();
-  const theme = themeById(DAILY.themes[hashString(date) % DAILY.themes.length]);
   const played = load(DAILY_STORAGE + date);
-  $('daily-text').textContent = `${date} · ${describe(theme.name, DAILY.mode, DAILY.timeLimit)}` +
+  $('daily-icon').innerHTML = ICONS.daily;
+  $('daily-text').textContent = `${date} · ${describe(dailyTheme(date).name, DAILY.mode, DAILY.timeLimit)}` +
     (played != null ? ` · you scored ${fmtPts(Number(played))}` : '');
   const btn = $('daily-btn');
   if (played != null) {
@@ -591,6 +637,14 @@ function renderDailyCard() {
     btn.textContent = 'Play';
     btn.onclick = playDaily;
   }
+}
+
+// ---------- custom game ----------
+
+function renderCustom() {
+  renderThemes();
+  renderModes();
+  renderTimeLimits();
 }
 
 function renderThemes() {
@@ -616,6 +670,18 @@ function renderThemes() {
   }));
 }
 
+function renderModes() {
+  const current = readMode();
+  $('modes').replaceChildren(...Object.entries(MODES).map(([id, m]) => {
+    const b = document.createElement('button');
+    b.textContent = m.name;
+    b.classList.toggle('selected', id === current);
+    b.onclick = () => { save(MODE_STORAGE, id); renderModes(); };
+    return b;
+  }));
+  $('mode-hint').textContent = MODES[current].hint;
+}
+
 function renderTimeLimits() {
   const current = readTimeLimit();
   $('time-limits').replaceChildren(...TIME_LIMITS.map((t) => {
@@ -629,8 +695,9 @@ function renderTimeLimits() {
 
 // ---------- wiring ----------
 
-document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () =>
-  startGame({ theme: readTheme(), mode: b.dataset.mode, timeLimit: readTimeLimit() })));
+$('open-custom').addEventListener('click', () => show('custom'));
+$('custom-back').addEventListener('click', () => show('menu'));
+$('custom-start').addEventListener('click', playCustom);
 $('challenge-btn').addEventListener('click', playChallenge);
 $('challenge-skip').addEventListener('click', () => { challenge = null; renderChallengeCard(); });
 $('guess-btn').addEventListener('click', () => submitGuess());

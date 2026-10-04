@@ -18,17 +18,32 @@
     <button id="challenge-skip" class="link">skip</button>
     <button id="challenge-btn" class="primary">Play</button>
   </div>
+  <button id="play" class="hero">
+    <span id="play-icon"></span>
+    <span class="hero-text"><b>Play</b><span id="play-text"></span></span>
+  </button>
+
   <div id="daily-card" class="card">
+    <span id="daily-icon" class="card-icon"></span>
     <div><b>Daily</b><span id="daily-text"></span></div>
     <button id="daily-btn" class="primary">Play</button>
   </div>
 
+  <div id="presets"></div>
+
+  <button id="open-custom" class="link-row"><span id="custom-icon"></span>custom game</button>
+</section>
+
+<section id="custom" class="screen hidden">
+  <h2>Custom game</h2>
+  <div class="setting"><span>where</span></div>
   <div id="themes"></div>
+  <div class="setting"><span>mode</span><div id="modes" class="segmented"></div></div>
+  <p id="mode-hint" class="hint"></p>
   <div class="setting"><span>time limit</span><div id="time-limits" class="segmented"></div></div>
-  <div class="modes">
-    <button data-mode="move"><b>Move</b><span>look around, walk anywhere</span></button>
-    <button data-mode="nm"><b>No move</b><span>look around and zoom</span></button>
-    <button data-mode="nmpz"><b>Still</b><span>one photo, nothing else</span></button>
+  <div class="actions">
+    <button id="custom-back" class="link">back</button>
+    <button id="custom-start" class="primary">Start</button>
   </div>
 </section>
 
@@ -81,7 +96,8 @@
     "./regions.js": "./regions.js?v=__VERSION__",
     "./places.js": "./places.js?v=__VERSION__",
     "./themes.js": "./themes.js?v=__VERSION__",
-    "./globe.js": "./globe.js?v=__VERSION__"
+    "./globe.js": "./globe.js?v=__VERSION__",
+    "./icons.js": "./icons.js?v=__VERSION__"
   }
 }
 </script>

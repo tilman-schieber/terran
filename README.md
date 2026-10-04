@@ -2,23 +2,26 @@
 
 Street View guessing. No music, no avatars, no accounts.
 
-Five rounds, the three classic modes, optional time limit (10s to 5 min):
+Five rounds per game. Hit **Play** for the default: anywhere in the world, Move, 2 minutes per round.
+Or pick one of the ready-made games:
 
-- **Move** – look around and walk anywhere
-- **No move** – look around and zoom, but stay put
-- **Still** – one fixed photo (NMPZ)
+| Game | Where | Mode | Time |
+|---|---|---|---|
+| Sightseeing | landmarks, you start facing them | Move | none |
+| Capital hop | capital cities | No move | 1 min |
+| World tour | one round per continent | No move | 1 min |
+| Lookalikes | a random look-alike group (Nordics, Balkans, Andes…) | No move | 2 min |
+| Lost | the middle of nowhere | Move | 5 min |
+| Snapshot | anywhere | Still | 30s |
 
+Modes: **Move** (walk anywhere), **No move** (look and zoom), **Still** (one fixed view, NMPZ).
 When the time runs out a placed pin is submitted, no pin scores 0.
 
-Themes decide where the five places come from:
+**Custom game** lets you pick any theme (World, capitals, big cities, landmarks, islands, middle of nowhere,
+five continents, a single continent, a look-alike group), any mode and any time limit.
 
-- **World** – anywhere with coverage
-- **Places** – capitals, big cities, landmarks (you start facing it), islands, middle of nowhere
-- **Regions** – five continents (one round each), or a single continent
-- **Tricky neighbours** – Nordics, Baltics, Balkans, Andes, Southeast Asia, Anglosphere
-
-**Daily**: the same five places for everyone, picked from the UTC date. The theme rotates; mode (No move) and
-time limit (2 min) are fixed so scores compare.
+**Daily**: the same five places for everyone, picked from the UTC date. The theme rotates; the settings are
+Classic's (Move, 2 min) so scores compare.
 
 **Challenge link**: after a game, copy a link with your exact five places and score for someone to beat.
 
@@ -50,7 +53,8 @@ Live at https://gh.tschieber.de/terran/
 
 - `regions.js`: weighted boxes around areas with coverage (world, islands, remote areas, look-alike groups)
 - `places.js`: capitals, big cities and landmarks
-- `themes.js`: which list each theme uses and how far from a box point or place a round may land
+- `themes.js`: which list each theme uses, how far from a box point or place a round may land, the ready-made games
+- `icons.js`: the menu line drawings
 
 A random point in a box, or near a place, is snapped to the nearest official Google panorama. A game never uses the
 same box or place twice. Location lookups don't count against the daily quota; only panorama and map loads do.

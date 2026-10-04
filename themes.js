@@ -34,9 +34,21 @@ export const THEMES = [
 
 export const themeById = (id) => THEMES.find((t) => t.id === id);
 
-// The daily game rotates through these; mode and time limit are fixed so scores compare.
+// Ready-made games on the menu. The first one is the big Play button.
+// theme 'lookalikes' picks one of the tricky neighbour groups at random each game.
+export const PRESETS = [
+  { id: 'classic', name: 'Classic', blurb: 'Anywhere in the world. Walk around.', theme: 'world', mode: 'move', timeLimit: 120 },
+  { id: 'sightseeing', name: 'Sightseeing', blurb: 'Famous places. You start facing them.', theme: 'landmarks', mode: 'move', timeLimit: 0, tag: 'easy' },
+  { id: 'capitals', name: 'Capital hop', blurb: 'Capital cities, seen from one spot.', theme: 'capitals', mode: 'nm', timeLimit: 60 },
+  { id: 'tour', name: 'World tour', blurb: 'One round on every continent.', theme: 'continents', mode: 'nm', timeLimit: 60 },
+  { id: 'lookalikes', name: 'Lookalikes', blurb: 'Neighbours that look the same. Spot the details.', theme: 'lookalikes', mode: 'nm', timeLimit: 120 },
+  { id: 'lost', name: 'Lost', blurb: 'The middle of nowhere. Find a sign.', theme: 'nowhere', mode: 'move', timeLimit: 300 },
+  { id: 'snapshot', name: 'Snapshot', blurb: 'One look. No moving, no turning.', theme: 'world', mode: 'nmpz', timeLimit: 30, tag: 'hard' },
+];
+
+// The daily game rotates through these themes with the Classic settings, so scores compare.
 export const DAILY = {
   themes: ['world', 'capitals', 'cities', 'islands', 'nowhere', 'continents', 'world'],
-  mode: 'nm',
+  mode: 'move',
   timeLimit: 120,
 };
