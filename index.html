@@ -16,6 +16,7 @@
     <button data-mode="nm"><b>No move</b><span>look around and zoom</span></button>
     <button data-mode="nmpz"><b>Still</b><span>one photo, nothing else</span></button>
   </div>
+  <div class="setting"><span>time limit</span><div id="time-limits" class="segmented"></div></div>
   <button id="change-key" class="link">change api key</button>
 </section>
 
@@ -36,9 +37,13 @@
   <div id="hud">
     <span id="hud-round"></span>
     <span id="hud-score"></span>
+    <span id="hud-timer" class="hidden"></span>
     <button id="quit" class="link">menu</button>
   </div>
-  <button id="to-start" class="hidden" title="Back to start (R)">back to start</button>
+  <div id="walk-controls" class="hidden">
+    <button id="to-start" title="Back to start (R)">back to start</button>
+    <button id="undo" title="Undo last move (Z)">undo</button>
+  </div>
 
   <div id="guess-box">
     <div id="map"></div>

@@ -2,11 +2,13 @@
 
 Street View guessing. No music, no avatars, no accounts.
 
-Five rounds, three modes:
+Five rounds, the three classic modes, optional time limit (10s to 5 min):
 
 - **Move** – look around and walk anywhere
 - **No move** – look around and zoom, but stay put
-- **Still** – one fixed photo
+- **Still** – one fixed photo (NMPZ)
+
+When the time runs out a placed pin is submitted, no pin scores 0.
 
 Score per round: `5000 · e^(−km / 1492.7)`, so 25,000 points max per game.
 
@@ -30,6 +32,7 @@ Live at https://gh.tschieber.de/terran/
 
 - `Space` / `Enter`: guess, or go to the next round
 - `R`: back to start (Move mode)
+- `Z`: undo last move (Move mode)
 
 ## Locations
 

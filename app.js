@@ -3,6 +3,8 @@ import { GOOGLE_MAPS_KEY } from './config.js';
 
 const ROUNDS = 5;
 const KEY_STORAGE = 'terran.apiKey';
+const TIME_STORAGE = 'terran.timeLimit';
+const TIME_LIMITS = [0, 10, 30, 60, 120, 300]; // seconds, 0 = no limit
 
 const MODES = {
   move: { name: 'Move', look: true, walk: true },
@@ -18,7 +20,8 @@ let pano;        // google.maps.StreetViewPanorama
 let map;         // google.maps.Map; the guess box grows to full screen for results
 let guessMarker = null;
 let resultOverlays = [];
-let game = null; // { mode, round, results, start, guess, phase }
+let game = null; // { mode, timeLimit, round, results, usedRegions, start, trail, guess, phase }
+let timer = null;
 
 // ---------- storage ----------
 
@@ -26,6 +29,12 @@ function readKey() {
   const fromUrl = new URLSearchParams(location.search).get('key');
   if (fromUrl) return fromUrl;
   try { return localStorage.getItem(KEY_STORAGE) || GOOGLE_MAPS_KEY; } catch { return GOOGLE_MAPS_KEY; }
+}
+function readTimeLimit() {
+  try { const t = Number(localStorage.getItem(TIME_STORAGE)); return TIME_LIMITS.includes(t) ? t : 0; } catch { return 0; }
+}
+function writeTimeLimit(t) {
+  try { localStorage.setItem(TIME_STORAGE, String(t)); } catch {}
 }
 function writeKey(key) {
   try { key ? localStorage.setItem(KEY_STORAGE, key) : localStorage.removeItem(KEY_STORAGE); } catch {}
@@ -76,12 +85,18 @@ async function initGoogle() {
     panControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
     zoomControlOptions: { position: google.maps.ControlPosition.LEFT_BOTTOM },
   });
+  // remember every panorama walked to, so moves can be undone
+  pano.addListener('pano_changed', () => {
+    if (game?.phase !== 'guessing') return;
+    const id = pano.getPano();
+    if (game.trail.at(-1) !== id) game.trail.push(id);
+  });
 }
 
 function configurePano(mode) {
   const m = MODES[mode];
   pano.setOptions({
-    panControl: m.look,
+    panControl: true, // the compass shows in every mode; in Still the freeze layer makes it read-only
     zoomControl: m.look,
     scrollwheel: m.look,
     linksControl: m.walk,
@@ -90,35 +105,37 @@ function configurePano(mode) {
     keyboardShortcuts: m.walk,
   });
   $('freeze').classList.toggle('hidden', m.look);
-  $('to-start').classList.toggle('hidden', !m.walk);
+  $('walk-controls').classList.toggle('hidden', !m.walk);
 }
 
 // ---------- random location ----------
 
-const totalWeight = REGIONS.reduce((sum, r) => sum + r.w, 0);
-
-function randomPoint() {
-  let pick = Math.random() * totalWeight;
-  const r = REGIONS.find((r) => (pick -= r.w) < 0) || REGIONS[REGIONS.length - 1];
+// pick a weighted region, skipping ones already used this game
+function randomPoint(used) {
+  let pool = REGIONS.filter((r) => !used.has(r.name));
+  if (!pool.length) pool = REGIONS;
+  let pick = Math.random() * pool.reduce((sum, r) => sum + r.w, 0);
+  const r = pool.find((r) => (pick -= r.w) < 0) || pool[pool.length - 1];
   // uniform on the sphere within the box
   const [s, n] = [r.lat[0], r.lat[1]].map((d) => Math.sin(d * Math.PI / 180));
   const lat = Math.asin(s + Math.random() * (n - s)) * 180 / Math.PI;
   const lng = r.lng[0] + Math.random() * (r.lng[1] - r.lng[0]);
-  return { lat, lng };
+  return { lat, lng, region: r.name };
 }
 
-async function findPano() {
+async function findPano(used) {
   for (let attempt = 0; attempt < 100; attempt++) {
+    const { region, ...location } = randomPoint(used);
     try {
       const { data } = await sv.getPanorama({
-        location: randomPoint(),
+        location,
         radius: 50000,
         sources: [svLib.StreetViewSource.GOOGLE],
         preference: svLib.StreetViewPreference.NEAREST,
       });
       // official road coverage has links to neighbouring panoramas; lone photospheres don't
       if (data?.location?.pano && data.links?.length) {
-        return { pano: data.location.pano, lat: data.location.latLng.lat(), lng: data.location.latLng.lng() };
+        return { pano: data.location.pano, lat: data.location.latLng.lat(), lng: data.location.latLng.lng(), region };
       }
     } catch {
       // ZERO_RESULTS: try another spot
@@ -182,15 +199,16 @@ function score(km) {
   return Math.round(5000 * Math.exp(-km / 1492.7));
 }
 
-const fmtKm = (km) => km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km).toLocaleString('en')} km`;
+const fmtKm = (km) => km == null ? 'no guess' : km < 1 ? `${Math.round(km * 1000)} m` : `${Math.round(km).toLocaleString('en')} km`;
 const fmtPts = (p) => p.toLocaleString('en');
+const fmtLimit = (t) => t < 60 ? `${t}s` : `${t / 60} min`;
 const total = () => game.results.reduce((s, r) => s + r.points, 0);
 const mapsLink = (p) => `https://www.google.com/maps/@?api=1&map_action=pano&pano=${encodeURIComponent(p.pano)}`;
 
 // ---------- game flow ----------
 
 function startGame(mode) {
-  game = { mode, round: 0, results: [], phase: 'loading' };
+  game = { mode, timeLimit: readTimeLimit(), round: 0, results: [], usedRegions: new Set(), phase: 'loading' };
   configurePano(mode);
   show('game');
   nextRound();
@@ -213,7 +231,7 @@ async function nextRound() {
 
   let place;
   try {
-    place = await findPano();
+    place = await findPano(game.usedRegions);
   } catch (e) {
     $('loading').textContent = e.message;
     game.round--;
@@ -222,27 +240,62 @@ async function nextRound() {
   }
   if (!game) return; // quit while loading
 
+  game.usedRegions.add(place.region);
   game.start = { ...place, pov: { heading: Math.random() * 360, pitch: 0 } };
+  game.trail = [place.pano];
   pano.setPano(place.pano);
   pano.setPov(game.start.pov);
-  pano.setZoom(game.mode === 'nmpz' ? 0.5 : 0);
+  pano.setZoom(0);
 
   $('loading').classList.add('hidden');
   game.phase = 'guessing';
+  startTimer();
+}
+
+// ---------- timer ----------
+
+function startTimer() {
+  stopTimer();
+  if (!game.timeLimit) return;
+  const deadline = Date.now() + game.timeLimit * 1000;
+  const tick = () => {
+    const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    $('hud-timer').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    $('hud-timer').classList.toggle('low', left <= 10);
+    if (left === 0) submitGuess(true);
+  };
+  $('hud-timer').classList.remove('hidden');
+  tick();
+  timer = setInterval(tick, 250);
+}
+
+function stopTimer() {
+  clearInterval(timer);
+  timer = null;
+  $('hud-timer').classList.add('hidden');
 }
 
 function backToStart() {
   if (game?.phase !== 'guessing' || !MODES[game.mode].walk) return;
+  game.trail = [game.start.pano];
   pano.setPano(game.start.pano);
   pano.setPov(game.start.pov);
   pano.setZoom(0);
 }
 
-function submitGuess() {
-  if (game?.phase !== 'guessing' || !game.guess) return;
+function undoMove() {
+  if (game?.phase !== 'guessing' || !MODES[game.mode].walk || game.trail.length < 2) return;
+  game.trail.pop();
+  pano.setPano(game.trail.at(-1));
+}
+
+// timedOut: the clock ran out, so submit whatever is there (nothing placed scores 0)
+function submitGuess(timedOut = false) {
+  if (game?.phase !== 'guessing' || (!game.guess && !timedOut)) return;
+  stopTimer();
   game.phase = 'result';
-  const km = distanceKm(game.guess, game.start);
-  const result = { actual: game.start, guess: game.guess, km, points: score(km) };
+  const km = game.guess ? distanceKm(game.guess, game.start) : null;
+  const result = { actual: game.start, guess: game.guess, km, points: km == null ? 0 : score(km) };
   game.results.push(result);
   updateHud();
   showResult([result]);
@@ -250,7 +303,7 @@ function submitGuess() {
   const last = game.round >= ROUNDS;
   $('result-text').innerHTML =
     `<div class="big">${fmtPts(result.points)} points</div>` +
-    `<div class="muted">${fmtKm(km)} away · <a href="${mapsLink(result.actual)}" target="_blank" rel="noopener">open in Google Maps</a></div>`;
+    `<div class="muted">${km == null ? 'Time\'s up' : `${fmtKm(km)} away`} · <a href="${mapsLink(result.actual)}" target="_blank" rel="noopener">open in Google Maps</a></div>`;
   setActions([[last ? 'Final score' : 'Next round', last ? showSummary : nextRound]]);
 }
 
@@ -262,7 +315,8 @@ function showSummary() {
     `<td><a href="${mapsLink(r.actual)}" target="_blank" rel="noopener">view</a></td></tr>`).join('');
   $('result-text').innerHTML =
     `<div class="big">${fmtPts(total())} / ${fmtPts(ROUNDS * 5000)}</div>` +
-    `<div class="muted">${MODES[game.mode].name}</div><table>${rows}</table>`;
+    `<div class="muted">${MODES[game.mode].name}${game.timeLimit ? ` · ${fmtLimit(game.timeLimit)}` : ''}</div>` +
+    `<table>${rows}</table>`;
   const mode = game.mode;
   setActions([['Menu', quit, false], ['Play again', () => startGame(mode)]]);
 }
@@ -278,16 +332,22 @@ async function showResult(results) {
   map.setOptions({ draggableCursor: null });
   const bounds = new google.maps.LatLngBounds();
   for (const r of results) {
+    resultOverlays.push(new google.maps.Marker({ map, position: r.actual, icon: dot('#ff5a36', 8), clickable: false }));
+    bounds.extend(r.actual);
+    if (!r.guess) continue;
     resultOverlays.push(
       new google.maps.Polyline({
         map, path: [r.guess, r.actual], geodesic: true, strokeOpacity: 0,
         icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#111', scale: 2 }, offset: '0', repeat: '12px' }],
       }),
       new google.maps.Marker({ map, position: r.guess, icon: dot('#fff', 7), clickable: false }),
-      new google.maps.Marker({ map, position: r.actual, icon: dot('#ff5a36', 8), clickable: false }),
     );
     bounds.extend(r.guess);
-    bounds.extend(r.actual);
+  }
+  if (results.length === 1 && !results[0].guess) {
+    map.setCenter(results[0].actual);
+    map.setZoom(4);
+    return;
   }
   map.fitBounds(bounds, 60);
   google.maps.event.addListenerOnce(map, 'idle', () => { if (map.getZoom() > 14) map.setZoom(14); });
@@ -310,6 +370,7 @@ function updateHud() {
 }
 
 function quit() {
+  stopTimer();
   game = null;
   $('game').classList.remove('showing-result');
   show('menu');
@@ -318,8 +379,21 @@ function quit() {
 // ---------- wiring ----------
 
 document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.mode)));
-$('guess-btn').addEventListener('click', submitGuess);
+$('guess-btn').addEventListener('click', () => submitGuess());
 $('to-start').addEventListener('click', backToStart);
+$('undo').addEventListener('click', undoMove);
+
+function renderTimeLimits() {
+  const current = readTimeLimit();
+  $('time-limits').replaceChildren(...TIME_LIMITS.map((t) => {
+    const b = document.createElement('button');
+    b.textContent = t ? fmtLimit(t) : 'off';
+    b.classList.toggle('selected', t === current);
+    b.onclick = () => { writeTimeLimit(t); renderTimeLimits(); };
+    return b;
+  }));
+}
+renderTimeLimits();
 $('quit').addEventListener('click', quit);
 $('change-key').addEventListener('click', () => { writeKey(null); location.reload(); });
 $('key-form').addEventListener('submit', (e) => {
@@ -338,6 +412,8 @@ document.addEventListener('keydown', (e) => {
     }
   } else if (e.key === 'r' || e.key === 'R') {
     backToStart();
+  } else if (e.key === 'z' || e.key === 'Z') {
+    undoMove();
   }
 });
 
