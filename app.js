@@ -1,6 +1,7 @@
 import { REGIONS } from './regions.js';
 import { THEMES, CONTINENTS, DAILY, themeById } from './themes.js';
 import { GOOGLE_MAPS_KEY } from './config.js';
+import { mountGlobe } from './globe.js';
 
 const ROUNDS = 5;
 const KEY_STORAGE = 'terran.apiKey';
@@ -660,6 +661,7 @@ document.addEventListener('keydown', (e) => {
 // ---------- boot ----------
 
 (async () => {
+  mountGlobe($('globe'));
   challenge = readChallenge();
   const key = readKey();
   if (!key) return showKeyScreen();

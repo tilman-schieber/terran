@@ -38,6 +38,12 @@ button.link { background: none; border: 0; padding: 0; color: var(--muted); text
   padding: 16px;
   text-align: center;
 }
+#globe { display: block; margin-bottom: -8px; }
+#globe path, #globe circle { fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.globe-back { stroke: var(--line); stroke-width: 1; }
+.globe-rim { stroke: var(--text); stroke-width: 1.4; }
+.globe-front { stroke: var(--text); stroke-width: 1; opacity: .85; }
+#globe .globe-pin { fill: var(--accent); stroke: var(--bg); stroke-width: 1; }
 h1 { margin: 0; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
 .sub { margin: 0; color: var(--muted); line-height: 1.5; }
 .error { margin: 0; color: var(--accent); }
