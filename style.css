@@ -11,7 +11,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; }
+html, body { margin: 0; height: 100%; }
+body:has(#game:not(.hidden)) { overflow: hidden; }
 button { font: inherit; color: inherit; cursor: pointer; }
 .hidden { display: none !important; }
 
@@ -28,7 +29,7 @@ button.link { background: none; border: 0; padding: 0; color: var(--muted); text
 
 /* menu + key screen */
 .screen {
-  height: 100%;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -44,6 +45,29 @@ h1 { margin: 0; font-size: 56px; font-weight: 700; letter-spacing: -0.03em; }
 .modes button { width: 200px; padding: 18px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
 .modes b { font-size: 18px; }
 .modes span { color: var(--muted); font-size: 14px; }
+.card {
+  display: flex; gap: 14px; align-items: center;
+  width: min(640px, 100%);
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; text-align: left;
+}
+.card > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.card span { color: var(--muted); font-size: 14px; }
+#challenge-card { border-color: var(--accent); }
+
+#themes { display: flex; flex-direction: column; gap: 8px; align-items: center; margin-top: 8px; }
+.theme-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.theme-row span { color: var(--muted); font-size: 14px; margin-right: 6px; }
+button.chip:not(.link) { padding: 5px 11px; font-size: 14px; border-radius: 999px; }
+button.chip.selected { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.verdict { margin-top: 4px; font-weight: 600; }
+.copy-out {
+  display: block; width: min(520px, 100%); margin-top: 8px;
+  font: inherit; font-size: 13px; color: inherit;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px;
+}
+
 .setting { display: flex; gap: 12px; align-items: center; color: var(--muted); font-size: 14px; flex-wrap: wrap; justify-content: center; }
 .segmented { display: flex; }
 .segmented button:not(.link) { border-radius: 0; margin-left: -1px; padding: 6px 12px; font-size: 14px; }

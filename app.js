@@ -1,9 +1,12 @@
 import { REGIONS } from './regions.js';
+import { THEMES, CONTINENTS, DAILY, themeById } from './themes.js';
 import { GOOGLE_MAPS_KEY } from './config.js';
 
 const ROUNDS = 5;
 const KEY_STORAGE = 'terran.apiKey';
 const TIME_STORAGE = 'terran.timeLimit';
+const THEME_STORAGE = 'terran.theme';
+const DAILY_STORAGE = 'terran.daily.'; // + date
 const TIME_LIMITS = [0, 10, 30, 60, 120, 300]; // seconds, 0 = no limit
 
 const MODES = {
@@ -20,30 +23,64 @@ let pano;        // google.maps.StreetViewPanorama
 let map;         // google.maps.Map; the guess box grows to full screen for results
 let guessMarker = null;
 let resultOverlays = [];
-let game = null; // { mode, timeLimit, round, results, usedRegions, start, trail, guess, phase }
+let game = null; // see startGame
 let timer = null;
+let challenge = null; // decoded challenge link waiting on the menu
 
 // ---------- storage ----------
 
+function load(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function save(key, value) {
+  try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, String(value)); } catch {}
+}
+
 function readKey() {
-  const fromUrl = new URLSearchParams(location.search).get('key');
-  if (fromUrl) return fromUrl;
-  try { return localStorage.getItem(KEY_STORAGE) || GOOGLE_MAPS_KEY; } catch { return GOOGLE_MAPS_KEY; }
+  return new URLSearchParams(location.search).get('key') || load(KEY_STORAGE) || GOOGLE_MAPS_KEY;
 }
 function readTimeLimit() {
-  try { const t = Number(localStorage.getItem(TIME_STORAGE)); return TIME_LIMITS.includes(t) ? t : 0; } catch { return 0; }
+  const t = Number(load(TIME_STORAGE));
+  return TIME_LIMITS.includes(t) ? t : 0;
 }
-function writeTimeLimit(t) {
-  try { localStorage.setItem(TIME_STORAGE, String(t)); } catch {}
+function readTheme() {
+  return themeById(load(THEME_STORAGE)) || THEMES[0];
 }
-function writeKey(key) {
-  try { key ? localStorage.setItem(KEY_STORAGE, key) : localStorage.removeItem(KEY_STORAGE); } catch {}
+
+// ---------- seeded random ----------
+
+function hashString(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+// mulberry32: small, fast, good enough to pick places
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffle(list, rng) {
+  const a = [...list];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
 }
 
 // ---------- screens ----------
 
 function show(id) {
   for (const s of ['menu', 'keyscreen', 'game']) $(s).classList.toggle('hidden', s !== id);
+  if (id === 'menu') renderMenu();
 }
 
 function showKeyScreen(error) {
@@ -58,7 +95,7 @@ function showKeyScreen(error) {
 function loadGoogle(key) {
   return new Promise((resolve, reject) => {
     window.gm_authFailure = () => {
-      writeKey(null);
+      save(KEY_STORAGE, null);
       showKeyScreen('Google rejected that key. Check that the Maps JavaScript API is enabled for it.');
     };
     window.__terranGoogleReady = resolve;
@@ -108,38 +145,85 @@ function configurePano(mode) {
   $('walk-controls').classList.toggle('hidden', !m.walk);
 }
 
-// ---------- random location ----------
+// ---------- picking places ----------
 
-// pick a weighted region, skipping ones already used this game
-function randomPoint(used) {
-  let pool = REGIONS.filter((r) => !used.has(r.name));
-  if (!pool.length) pool = REGIONS;
-  let pick = Math.random() * pool.reduce((sum, r) => sum + r.w, 0);
-  const r = pool.find((r) => (pick -= r.w) < 0) || pool[pool.length - 1];
-  // uniform on the sphere within the box
-  const [s, n] = [r.lat[0], r.lat[1]].map((d) => Math.sin(d * Math.PI / 180));
-  const lat = Math.asin(s + Math.random() * (n - s)) * 180 / Math.PI;
-  const lng = r.lng[0] + Math.random() * (r.lng[1] - r.lng[0]);
-  return { lat, lng, region: r.name };
+const RAD = Math.PI / 180;
+
+// move a point `km` kilometres in direction `deg`
+function offset(p, km, deg) {
+  const dLat = (km / 111.32) * Math.cos(deg * RAD);
+  const dLng = (km / (111.32 * Math.cos(p.lat * RAD))) * Math.sin(deg * RAD);
+  return { lat: p.lat + dLat, lng: p.lng + dLng };
 }
 
-async function findPano(used) {
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const { region, ...location } = randomPoint(used);
+function bearing(from, to) {
+  const dLng = (to.lng - from.lng) * RAD;
+  const y = Math.sin(dLng) * Math.cos(to.lat * RAD);
+  const x = Math.cos(from.lat * RAD) * Math.sin(to.lat * RAD) -
+    Math.sin(from.lat * RAD) * Math.cos(to.lat * RAD) * Math.cos(dLng);
+  return (Math.atan2(y, x) / RAD + 360) % 360;
+}
+
+// one candidate spot for this round; `key` names the box or place so a game doesn't repeat it
+function pickSpot() {
+  const { theme, rng, used } = game;
+  const unused = (list) => {
+    const fresh = list.filter((x) => !used.has(x.name));
+    return fresh.length ? fresh : list;
+  };
+
+  if (theme.kind === 'points') {
+    const pool = unused(theme.points);
+    const place = pool[Math.floor(rng() * pool.length)];
+    const at = theme.jitterKm ? offset(place, theme.jitterKm * Math.sqrt(rng()), rng() * 360) : place;
+    return { lat: at.lat, lng: at.lng, key: place.name, target: theme.face ? place : null };
+  }
+
+  const regions = theme.kind === 'continents'
+    ? REGIONS.filter((r) => r.c === game.continents[game.round - 1])
+    : theme.regions;
+  const pool = unused(regions);
+  let pick = rng() * pool.reduce((sum, r) => sum + r.w, 0);
+  const r = pool.find((r) => (pick -= r.w) < 0) || pool[pool.length - 1];
+  // uniform on the sphere within the box
+  const [s, n] = [r.lat[0], r.lat[1]].map((d) => Math.sin(d * RAD));
+  const lat = Math.asin(s + rng() * (n - s)) / RAD;
+  const lng = r.lng[0] + rng() * (r.lng[1] - r.lng[0]);
+  return { lat, lng, key: r.name };
+}
+
+const where = (data) => ({ pano: data.location.pano, lat: data.location.latLng.lat(), lng: data.location.latLng.lng() });
+
+async function findRound() {
+  // challenge links carry the exact panoramas
+  if (game.preset) {
+    const [id, heading] = game.preset[game.round - 1];
     try {
-      const { data } = await sv.getPanorama({
-        location,
-        radius: 50000,
+      const { data } = await sv.getPanorama({ pano: id });
+      return { ...where(data), heading };
+    } catch {
+      throw new Error('This place is no longer on Street View.');
+    }
+  }
+
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const spot = pickSpot();
+    let data;
+    try {
+      ({ data } = await sv.getPanorama({
+        location: { lat: spot.lat, lng: spot.lng },
+        radius: game.theme.radius,
         sources: [svLib.StreetViewSource.GOOGLE],
         preference: svLib.StreetViewPreference.NEAREST,
-      });
-      // official road coverage has links to neighbouring panoramas; lone photospheres don't
-      if (data?.location?.pano && data.links?.length) {
-        return { pano: data.location.pano, lat: data.location.latLng.lat(), lng: data.location.latLng.lng(), region };
-      }
+      }));
     } catch {
-      // ZERO_RESULTS: try another spot
+      continue; // ZERO_RESULTS: try another spot
     }
+    // official road coverage has links to neighbouring panoramas; lone photospheres don't
+    if (!data?.location?.pano || !data.links?.length) continue;
+    const place = where(data);
+    const heading = spot.target ? bearing(place, spot.target) : game.rng() * 360;
+    return { ...place, heading, key: spot.key };
   }
   throw new Error('Could not find any Street View coverage. Try again.');
 }
@@ -187,10 +271,9 @@ function clearMap() {
 // ---------- scoring ----------
 
 function distanceKm(a, b) {
-  const rad = Math.PI / 180;
-  const dLat = (b.lat - a.lat) * rad;
-  const dLng = (b.lng - a.lng) * rad;
-  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
+  const dLat = (b.lat - a.lat) * RAD;
+  const dLng = (b.lng - a.lng) * RAD;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * RAD) * Math.cos(b.lat * RAD) * Math.sin(dLng / 2) ** 2;
   return 2 * 6371 * Math.asin(Math.sqrt(h));
 }
 
@@ -204,17 +287,42 @@ const fmtPts = (p) => p.toLocaleString('en');
 const fmtLimit = (t) => t < 60 ? `${t}s` : `${t / 60} min`;
 const total = () => game.results.reduce((s, r) => s + r.points, 0);
 const mapsLink = (p) => `https://www.google.com/maps/@?api=1&map_action=pano&pano=${encodeURIComponent(p.pano)}`;
+const describe = (themeName, mode, limit) => [themeName, MODES[mode].name, limit ? fmtLimit(limit) : ''].filter(Boolean).join(' · ');
+const today = () => new Date().toISOString().slice(0, 10); // UTC, so everyone shares the same day
 
 // ---------- game flow ----------
 
-function startGame(mode) {
-  game = { mode, timeLimit: readTimeLimit(), round: 0, results: [], usedRegions: new Set(), phase: 'loading' };
-  configurePano(mode);
+// opts: { theme, mode, timeLimit, rng?, preset?, daily?, challenge? }
+function startGame(opts) {
+  const rng = opts.rng || Math.random;
+  game = {
+    ...opts,
+    rng,
+    round: 0,
+    results: [],
+    used: new Set(),
+    continents: opts.theme.kind === 'continents' ? shuffle(CONTINENTS, rng) : null,
+    phase: 'loading',
+  };
+  configurePano(game.mode);
   show('game');
   nextRound();
 }
 
+function playDaily() {
+  const date = today();
+  const theme = themeById(DAILY.themes[hashString(date) % DAILY.themes.length]);
+  startGame({ theme, mode: DAILY.mode, timeLimit: DAILY.timeLimit, rng: seededRandom(hashString(`terran-daily-${date}`)), daily: date });
+}
+
+function playChallenge() {
+  const c = challenge;
+  challenge = null;
+  startGame({ theme: themeById(c.t) || THEMES[0], mode: c.m, timeLimit: c.l, preset: c.r, challenge: c });
+}
+
 async function nextRound() {
+  if (game.round > 0 && game.phase !== 'result') return; // a double click or held key
   game.round++;
   game.phase = 'loading';
   game.guess = null;
@@ -229,19 +337,22 @@ async function nextRound() {
   $('guess-btn').disabled = true;
   $('guess-btn').textContent = 'Place your guess';
 
+  const current = game;
   let place;
   try {
-    place = await findPano(game.usedRegions);
+    place = await findRound();
   } catch (e) {
-    $('loading').textContent = e.message;
-    game.round--;
+    if (game !== current) return;
+    stopTimer();
+    $('loading').textContent = e.message || 'Could not load this place.';
+    game = null;
     setTimeout(() => show('menu'), 2500);
     return;
   }
-  if (!game) return; // quit while loading
+  if (game !== current) return; // quit while loading
 
-  game.usedRegions.add(place.region);
-  game.start = { ...place, pov: { heading: Math.random() * 360, pitch: 0 } };
+  if (place.key) game.used.add(place.key);
+  game.start = { ...place, pov: { heading: place.heading, pitch: 0 } };
   game.trail = [place.pano];
   pano.setPano(place.pano);
   pano.setPov(game.start.pov);
@@ -275,6 +386,8 @@ function stopTimer() {
   $('hud-timer').classList.add('hidden');
 }
 
+// ---------- moving ----------
+
 function backToStart() {
   if (game?.phase !== 'guessing' || !MODES[game.mode].walk) return;
   game.trail = [game.start.pano];
@@ -289,6 +402,8 @@ function undoMove() {
   pano.setPano(game.trail.at(-1));
 }
 
+// ---------- results ----------
+
 // timedOut: the clock ran out, so submit whatever is there (nothing placed scores 0)
 function submitGuess(timedOut = false) {
   if (game?.phase !== 'guessing' || (!game.guess && !timedOut)) return;
@@ -298,27 +413,45 @@ function submitGuess(timedOut = false) {
   const result = { actual: game.start, guess: game.guess, km, points: km == null ? 0 : score(km) };
   game.results.push(result);
   updateHud();
-  showResult([result]);
 
   const last = game.round >= ROUNDS;
   $('result-text').innerHTML =
     `<div class="big">${fmtPts(result.points)} points</div>` +
     `<div class="muted">${km == null ? 'Time\'s up' : `${fmtKm(km)} away`} · <a href="${mapsLink(result.actual)}" target="_blank" rel="noopener">open in Google Maps</a></div>`;
   setActions([[last ? 'Final score' : 'Next round', last ? showSummary : nextRound]]);
+  showResult([result]);
 }
 
 function showSummary() {
+  if (game.phase !== 'result') return;
   game.phase = 'summary';
-  showResult(game.results);
+  const points = total();
   const rows = game.results.map((r, i) =>
     `<tr><td>${i + 1}</td><td>${fmtPts(r.points)}</td><td>${fmtKm(r.km)}</td>` +
     `<td><a href="${mapsLink(r.actual)}" target="_blank" rel="noopener">view</a></td></tr>`).join('');
+  let note = '';
+  if (game.challenge) {
+    const theirs = game.challenge.s;
+    note = `<div class="verdict">${points > theirs ? 'You win' : points < theirs ? 'They win' : 'A draw'}: ` +
+      `${fmtPts(points)} vs ${fmtPts(theirs)}</div>`;
+  }
   $('result-text').innerHTML =
-    `<div class="big">${fmtPts(total())} / ${fmtPts(ROUNDS * 5000)}</div>` +
-    `<div class="muted">${MODES[game.mode].name}${game.timeLimit ? ` · ${fmtLimit(game.timeLimit)}` : ''}</div>` +
-    `<table>${rows}</table>`;
-  const mode = game.mode;
-  setActions([['Menu', quit, false], ['Play again', () => startGame(mode)]]);
+    `<div class="big">${fmtPts(points)} / ${fmtPts(ROUNDS * 5000)}</div>` +
+    `<div class="muted">${game.daily ? `Daily ${game.daily} · ` : ''}${describe(game.theme.name, game.mode, game.timeLimit)}</div>` +
+    note + `<table>${rows}</table>`;
+
+  if (game.daily) {
+    if (load(DAILY_STORAGE + game.daily) == null) save(DAILY_STORAGE + game.daily, points);
+    setActions([['Menu', quit, false], ['Copy result', (e) => copy(e.target, dailyText(game.daily, points))]]);
+  } else {
+    const { theme, mode, timeLimit } = game;
+    setActions([
+      ['Menu', quit, false],
+      ['Copy challenge link', (e) => copy(e.target, challengeLink()), false],
+      ['Play again', () => startGame({ theme, mode, timeLimit })],
+    ]);
+  }
+  showResult(game.results);
 }
 
 async function showResult(results) {
@@ -365,6 +498,7 @@ function setActions(actions) {
 }
 
 function updateHud() {
+  $('hud-theme').textContent = game.daily ? 'Daily' : game.challenge ? 'Challenge' : game.theme.name;
   $('hud-round').textContent = `Round ${Math.min(game.round, ROUNDS)} / ${ROUNDS}`;
   $('hud-score').textContent = `${fmtPts(total())} pts`;
 }
@@ -376,12 +510,110 @@ function quit() {
   show('menu');
 }
 
-// ---------- wiring ----------
+// ---------- sharing ----------
 
-document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => startGame(b.dataset.mode)));
-$('guess-btn').addEventListener('click', () => submitGuess());
-$('to-start').addEventListener('click', backToStart);
-$('undo').addEventListener('click', undoMove);
+const siteUrl = () => location.origin + location.pathname;
+
+function dailyText(date, points) {
+  return `terran daily ${date}: ${fmtPts(points)} / ${fmtPts(ROUNDS * 5000)}\n${siteUrl()}`;
+}
+
+function challengeLink() {
+  const data = {
+    t: game.theme.id, m: game.mode, l: game.timeLimit, s: total(),
+    r: game.results.map((r) => [r.actual.pano, Math.round(r.actual.pov.heading)]),
+  };
+  const encoded = btoa(JSON.stringify(data)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return `${siteUrl()}#c=${encoded}`;
+}
+
+function readChallenge() {
+  const m = location.hash.match(/^#c=([\w-]+)$/);
+  if (!m) return null;
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const c = JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/')));
+    const valid = MODES[c.m] && TIME_LIMITS.includes(c.l) && Number.isInteger(c.s) &&
+      Array.isArray(c.r) && c.r.length === ROUNDS &&
+      c.r.every(([id, h]) => typeof id === 'string' && /^[\w-]{1,100}$/.test(id) && Number.isFinite(h));
+    return valid ? c : null;
+  } catch {
+    return null;
+  }
+}
+
+async function copy(button, text) {
+  const label = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = 'Copied';
+  } catch {
+    // no clipboard access: show the text so it can be copied by hand
+    const out = document.createElement('input');
+    out.value = text;
+    out.readOnly = true;
+    out.className = 'copy-out';
+    $('result-text').append(out);
+    out.select();
+    button.textContent = 'Copy it below';
+  }
+  setTimeout(() => { button.textContent = label; }, 2000);
+}
+
+// ---------- menu ----------
+
+function renderMenu() {
+  renderChallengeCard();
+  renderDailyCard();
+  renderThemes();
+  renderTimeLimits();
+}
+
+function renderChallengeCard() {
+  $('challenge-card').classList.toggle('hidden', !challenge);
+  if (!challenge) return;
+  $('challenge-text').textContent =
+    `${describe((themeById(challenge.t) || THEMES[0]).name, challenge.m, challenge.l)} · beat ${fmtPts(challenge.s)}`;
+}
+
+function renderDailyCard() {
+  const date = today();
+  const theme = themeById(DAILY.themes[hashString(date) % DAILY.themes.length]);
+  const played = load(DAILY_STORAGE + date);
+  $('daily-text').textContent = `${date} · ${describe(theme.name, DAILY.mode, DAILY.timeLimit)}` +
+    (played != null ? ` · you scored ${fmtPts(Number(played))}` : '');
+  const btn = $('daily-btn');
+  if (played != null) {
+    btn.textContent = 'Copy result';
+    btn.onclick = () => copy(btn, dailyText(date, Number(played)));
+  } else {
+    btn.textContent = 'Play';
+    btn.onclick = playDaily;
+  }
+}
+
+function renderThemes() {
+  const current = readTheme();
+  const groups = [...new Set(THEMES.map((t) => t.group))];
+  $('themes').replaceChildren(...groups.map((g) => {
+    const row = document.createElement('div');
+    row.className = 'theme-row';
+    if (g) {
+      const label = document.createElement('span');
+      label.textContent = g;
+      row.append(label);
+    }
+    for (const t of THEMES.filter((t) => t.group === g)) {
+      const b = document.createElement('button');
+      b.className = 'chip';
+      b.textContent = t.name;
+      b.classList.toggle('selected', t === current);
+      b.onclick = () => { save(THEME_STORAGE, t.id); renderThemes(); };
+      row.append(b);
+    }
+    return row;
+  }));
+}
 
 function renderTimeLimits() {
   const current = readTimeLimit();
@@ -389,16 +621,25 @@ function renderTimeLimits() {
     const b = document.createElement('button');
     b.textContent = t ? fmtLimit(t) : 'off';
     b.classList.toggle('selected', t === current);
-    b.onclick = () => { writeTimeLimit(t); renderTimeLimits(); };
+    b.onclick = () => { save(TIME_STORAGE, t); renderTimeLimits(); };
     return b;
   }));
 }
-renderTimeLimits();
+
+// ---------- wiring ----------
+
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () =>
+  startGame({ theme: readTheme(), mode: b.dataset.mode, timeLimit: readTimeLimit() })));
+$('challenge-btn').addEventListener('click', playChallenge);
+$('challenge-skip').addEventListener('click', () => { challenge = null; renderChallengeCard(); });
+$('guess-btn').addEventListener('click', () => submitGuess());
+$('to-start').addEventListener('click', backToStart);
+$('undo').addEventListener('click', undoMove);
 $('quit').addEventListener('click', quit);
-$('change-key').addEventListener('click', () => { writeKey(null); location.reload(); });
+$('change-key').addEventListener('click', () => { save(KEY_STORAGE, null); location.reload(); });
 $('key-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  writeKey($('key-input').value.trim());
+  save(KEY_STORAGE, $('key-input').value.trim());
   location.reload();
 });
 
@@ -420,6 +661,7 @@ document.addEventListener('keydown', (e) => {
 // ---------- boot ----------
 
 (async () => {
+  challenge = readChallenge();
   const key = readKey();
   if (!key) return showKeyScreen();
   try {

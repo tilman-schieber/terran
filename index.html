@@ -11,12 +11,24 @@
 <section id="menu" class="screen hidden">
   <h1>terran</h1>
   <p class="sub">Five places. Guess where they are.</p>
+
+  <div id="challenge-card" class="card hidden">
+    <div><b>Challenge</b><span id="challenge-text"></span></div>
+    <button id="challenge-skip" class="link">skip</button>
+    <button id="challenge-btn" class="primary">Play</button>
+  </div>
+  <div id="daily-card" class="card">
+    <div><b>Daily</b><span id="daily-text"></span></div>
+    <button id="daily-btn" class="primary">Play</button>
+  </div>
+
+  <div id="themes"></div>
+  <div class="setting"><span>time limit</span><div id="time-limits" class="segmented"></div></div>
   <div class="modes">
     <button data-mode="move"><b>Move</b><span>look around, walk anywhere</span></button>
     <button data-mode="nm"><b>No move</b><span>look around and zoom</span></button>
     <button data-mode="nmpz"><b>Still</b><span>one photo, nothing else</span></button>
   </div>
-  <div class="setting"><span>time limit</span><div id="time-limits" class="segmented"></div></div>
   <button id="change-key" class="link">change api key</button>
 </section>
 
@@ -35,6 +47,7 @@
   <div id="freeze" class="hidden"></div>
 
   <div id="hud">
+    <span id="hud-theme"></span>
     <span id="hud-round"></span>
     <span id="hud-score"></span>
     <span id="hud-timer" class="hidden"></span>
