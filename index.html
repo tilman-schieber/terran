@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>terran</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="style.css?v=__VERSION__">
 </head>
 <body>
 
@@ -73,6 +73,18 @@
   <div id="loading" class="hidden">finding a place…</div>
 </section>
 
-<script type="module" src="app.js"></script>
+<!-- __VERSION__ is replaced with the commit on deploy, so a page never mixes cached files from two versions -->
+<script type="importmap">
+{
+  "imports": {
+    "./config.js": "./config.js?v=__VERSION__",
+    "./regions.js": "./regions.js?v=__VERSION__",
+    "./places.js": "./places.js?v=__VERSION__",
+    "./themes.js": "./themes.js?v=__VERSION__",
+    "./globe.js": "./globe.js?v=__VERSION__"
+  }
+}
+</script>
+<script type="module" src="app.js?v=__VERSION__"></script>
 </body>
 </html>
